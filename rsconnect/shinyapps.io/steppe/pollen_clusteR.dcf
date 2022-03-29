@@ -1,0 +1,14 @@
+name: pollen_clusteR
+title: pollen_clusteR
+username:
+account: steppe
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 3945965
+bundleId: 4459044
+url: https://steppe.shinyapps.io/pollen_clusteR/
+when: 1618196196.77661
+lastSyncTime: 1618196196.77661
+asMultiple: FALSE
+asStatic: FALSE
+ignoredFiles: Morphological_matrix.csv|Morphological_matrix2021-04-11.csv

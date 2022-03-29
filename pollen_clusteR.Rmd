@@ -1,0 +1,337 @@
+---
+title: "pollen_clusteR"
+author: "Reed & Emily"
+date: "4/10/2021"
+output:
+  pdf_document: default
+---
+
+We want a spreadsheet for easy interactive entering of data. Because we are on a shared lab computer without alot of common software, we can't exactly go around installing things like R, and some microsoft suites. I really do not like the functionality of google sheets, so we made our own app to collect data into. This will allow us to drag these data back into the R session really quickly. 
+
+These are the libraries we use for the project. 
+```{r, warning=F, message=F}
+shhh <- suppressPackageStartupMessages
+shhh(library(tidyverse))
+shhh(library(cluster))
+shhh(library(shiny))
+shhh(library(rhandsontable))
+shhh(library(rsconnect))
+shhh(library(here))
+rm(shhh)
+```
+
+I quickly set up an Rstudio.io account, using the direction here:
+https://shiny.rstudio.com/articles/shinyapps.html?_ga=2.191076643.86591529.1618194183-1026877914.1618194183
+```{r, eval = F, echo = F}
+rsconnect::setAccountInfo(name='steppe',
+			  token='4A8D4470F4F870A847ADCA881A5B8043',
+			  secret='LRmdiFOzlLrff+zojaHGh68rGH7KVaHi/1AIJ7w6')
+```
+
+# Import Data to score
+
+```{r}
+slides1 <- read.csv(paste0(here(), "/data/existing_pollen_reference_slides.csv"))[,c(1:2,4:5,11)] %>% 
+  janitor::clean_names() %>% 
+  filter(type == 'Image') %>% 
+  select(-type)
+
+slides2 <- readxl::read_excel(paste0(here(),"/data/Label_box.xlsx"))[,c(3:4,2)] %>% 
+  separate(Taxon, into = c("genus", "epithet"), sep = " ", extra = "drop")  %>% 
+  
+  mutate(Voucher_number = str_extract(Voucher, '(\\d+)')) %>% 
+  mutate(Voucher_number = as.numeric(Voucher_number)) %>% 
+  filter(Voucher_number < 2328) %>% 
+  select(-Voucher_number) %>% 
+  
+  rename_with(., tolower)
+
+slides1 <- rbind(slides1, slides2)
+
+slides3_2022 <- readxl::read_excel(paste0(here(),"/data/Label_box.xlsx"))[,c(3:4,2)] %>% 
+  separate(Taxon, into = c("genus", "epithet"), sep = " ", extra = "drop")  %>% 
+  
+  mutate(Voucher_number = str_extract(Voucher, '(\\d+)')) %>% 
+  mutate(Voucher_number = as.numeric(Voucher_number)) %>% 
+  filter(Voucher_number >= 2328) %>% 
+  select(-Voucher_number) %>% 
+  
+  rename_with(., tolower)
+
+```
+
+## Interactive data scoring table. 
+
+We Will tag some empty columns onto our dataframe so that we places to insert our data. 
+```{r, eval = F, echo = F}
+pollen_df <- slides1 %>% 
+  mutate(outline = "") %>% 
+  mutate(polarity = "") %>% 
+  mutate(dispersal_unit = "") %>% 
+  mutate(aperturate = "") %>% 
+  mutate(ornamentation = "") %>% 
+  mutate(saccate = "") %>% 
+  mutate(operculate = "") %>% 
+  mutate(annulate = "") %>% 
+  mutate(aperture_type = "") %>% 
+  mutate(aperture_number = "") %>% 
+  mutate(l_polar_lat = "") %>% 
+  mutate(l_equi_lat = "") 
+
+pollen_df <- read.csv(paste0(here(), "/data/Pollen_morpho_all.csv")) %>% 
+  mutate(l_polar_lat = "") %>% 
+  mutate(l_equi_lat = "") 
+```
+
+
+##Develop our glossary for drop-down options
+
+```{r, eval = F, echo = F}
+outline_cat <- c("circular", "elliptic", "triangular", "lobate",
+                 "quadrangular", "polygonal")
+polarity_cat <- c("heteropolar", "isopolar")
+dispersal_unit_cat <- c("monad", "dyad", "tryad", "polyad")
+aperturate_cat <- c("none", "heteroaperturate", "angulaperturate", "planaperturate")
+ornamentation_cat <- c("areolate", "bacculate", "bireticulate", "clavate",
+                       "clypteate", "echinate", "fossulate", "gemmate", 
+                       "heterobrochate", "homobrochate", "lophate", 
+                       "reticulate", "psilate", "scabrate", "striate", 
+                       "heterobrochate/psilate")
+saccate_cat <- c("none", "monosaccate", "bisaccate", "trisaccate")
+operculate_cat <- c("yes", "no")
+annulate_cat <- c("yes", "no")
+apertures_cat <- c("porate", "colpate", "colporate", "syncolpate")
+aperture_num_cat <- c("mono", "di", "tri", "tetra", "penta", "stephano", "panto")
+```
+
+
+# Analysis Section
+
+Here we implement a shiny app to enter data.
+```{r, eval = F}
+
+color_renderer <- "function(instance, td) {
+    Handsontable.renderers.TextRenderer.apply(this, arguments);
+    td.style.color = 'black';
+  }" # defining that we want BLACK text in our table. 
+
+ui <- shinyUI(fluidPage(
+  fluidRow(
+    titlePanel(title = "Pollen Morphology Scoring Sheet"),
+    hr(),
+    column(4,
+           rHandsontableOutput("table"),
+           br(),
+           actionButton("saveBtn", "Save")
+  ))
+)) # creating the user interface, KISS. 
+
+server <- shinyServer(function(input, output, session){
+  
+  output$table <- renderRHandsontable({
+    rhandsontable(pollen_df, width = 1400, height = 750) %>% #make the table big!!!
+      hot_col(1:15, renderer = color_renderer,) %>% # make the damn text black. 
+      hot_col(1:3, readOnly = TRUE) %>%  # disable ediing these values
+      hot_table(highlightCol = TRUE, highlightRow = TRUE) %>% #let us see where we are on the spreadhsset. 
+      
+      hot_col(col = "outline", type = "dropdown", source = outline_cat,
+              strict = F) %>% # dropdown options
+      hot_col(col = "polarity", type = "dropdown", source = polarity_cat, 
+              strict = F) %>%
+      hot_col(col = "dispersal_unit", type = "dropdown", source = dispersal_unit_cat,
+              strict = F) %>%
+      hot_col(col = "aperturate", type = "dropdown", source = aperturate_cat,
+              strict = F) %>%
+      hot_col(col = "ornamentation", type = "dropdown", source = ornamentation_cat,
+              strict = F) %>% 
+      hot_col(col = "saccate", type = "dropdown", source = saccate_cat,
+              strict = F) %>% 
+      hot_col(col = "operculate", type = "dropdown", source = operculate_cat, 
+              strict = F) %>% 
+      hot_col(col = "annulate", type = "dropdown", source = annulate_cat, 
+              strict = F) %>% 
+      hot_col(col = "aperture_type", type = "dropdown", source = apertures_cat, 
+              strict = F) %>% 
+      hot_col(col = "aperture_number", type = "dropdown", source = aperture_num_cat,
+              strict = F) %>% 
+      
+      hot_col(col = "l_polar_lat", type = "numeric",  strict = F) %>% 
+      hot_col(col = "l_equi_lat", type = "numeric", strict = F)
+  })
+  
+  observeEvent(input$saveBtn, write.csv(hot_to_r(input$table), 
+                                        file = paste0("Pollen_morpho_matrix.", 
+                                                      Sys.Date(),".csv"), 
+                                        append=TRUE,  row.names = F))
+  
+}) # And here is our table, we have 
+
+shinyApp(ui = ui, server = server)
+
+rm(annulate_cat, aperturate_cat, aperture_num_cat, apertures_cat, color_renderer, dispersal_unit_cat, operculate_cat, ornamentation_cat, outline_cat, polarity_cat, saccate_cat, slides)
+```
+
+
+You may go back and iteratively add more rows to the DF, or deal with some troublesome grains this way. 
+
+```{r, eval = F}
+
+raw <- paste0(here(), '/data/',
+                     list.files(paste0(here(), '/data/'), 
+                  pattern = 'Pollen_morpho_matrix[.]202[1-5]')
+)
+pollen_df <- read.csv(raw)
+```
+
+
+# Clustering
+
+Now we can cluster the results of the analysis. 
+
+## Matrices & Calculations
+
+```{r}
+raw <- paste0(here(), '/data/',
+                     list.files(paste0(here(), '/data/'), 
+                  pattern = 'Pollen_morpho_matrix[.]202[1-5]')
+)
+scored_data <- read.csv(raw, na.strings=c("","NA")) %>% janitor::clean_names()
+rm(raw)
+```
+
+```{r}
+scored_data <- scored_data %>% 
+  filter(if_any(4:13, ~!is.na(.))) %>% 
+  mutate(across(4:13, ~  as.factor(.))) %>% 
+  select(-l_polar_lat, -l_equi_lat) # test purposes remove later.
+  
+gower.dist <- daisy(scored_data[ ,4:13], metric = c("gower"))
+```
+
+```{r}
+divisive.clust <- diana(as.matrix(gower.dist), 
+                  diss = TRUE, keep.diss = TRUE)
+  
+plot(divisive.clust, main = "Divisive")[1]
+```
+
+## Diagnostics
+
+```{r}
+library(fpc)
+
+cstats.table <- function(dist, tree, k) {
+  clust.assess <- c("cluster.number","n","within.cluster.ss","average.within","average.between",
+                  "wb.ratio","dunn2","avg.silwidth")
+  clust.size <- c("cluster.size")
+  stats.names <- c()
+  row.clust <- c()
+  output.stats <- matrix(ncol = k, nrow = length(clust.assess))
+  cluster.sizes <- matrix(ncol = k, nrow = k)
+
+    for(i in c(1:k)){
+      row.clust[i] <- paste("Cluster-", i, " size")
+  }
+    for(i in c(2:k)){
+      stats.names[i] <- paste("Test", i-1)
+  
+    for(j in seq_along(clust.assess)){
+      output.stats[j, i] <- unlist(
+        cluster.stats(d = dist,
+                      clustering = cutree(tree, k =  i))[clust.assess])[j]
+    
+  }
+  
+  for(d in 1:k) {
+    cluster.sizes[d, i] <- unlist(
+      cluster.stats(d = dist, 
+                    clustering = cutree(tree, k = i))[clust.size])[d]
+    dim(cluster.sizes[d, i]) <- c(length(cluster.sizes[i]), 1)
+    cluster.sizes[d, i]
+    
+  }
+}
+  output.stats.df <- data.frame(output.stats)
+  cluster.sizes <- data.frame(cluster.sizes)
+  cluster.sizes[is.na(cluster.sizes)] <- 0
+  rows.all <- c(clust.assess, row.clust)
+  # rownames(output.stats.df) <- clust.assess
+  output <- rbind(output.stats.df, cluster.sizes)[ ,-1]
+  colnames(output) <- stats.names[2:k]
+  rownames(output) <- rows.all
+  is.num <- sapply(output, is.numeric)
+  output[is.num] <- lapply(output[is.num], round, 2)
+  output
+}
+
+stats.df.divisive <- cstats.table(gower.dist, divisive.clust, 7)
+print(stats.df.divisive)
+```
+
+An elbow plot, of divisive clustering. 
+```{r}
+ggplot(data = data.frame(t(cstats.table(gower.dist, divisive.clust, 15))), 
+  aes(x=cluster.number, y=within.cluster.ss)) + 
+  geom_point()+
+  geom_line()+
+  ggtitle("Divisive clustering of Pollen Grain Morphotypes") +
+  labs(x = "Number of clusters", y = "Within clusters sum of squares (SS)") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  theme_bw()
+
+```
+
+## Visualization 
+
+```{r}
+library(dendextend)
+
+dendro <- as.dendrogram(divisive.clust)
+labels(dendro) <- paste(as.character(scored_data[,1])[order.dendrogram(dendro)], "(",labels(dendro),")", sep = "")
+
+
+# position <- scored_data %>% 
+#   rowid_to_column() %>% 
+#   pull(rowid)
+# 
+# nomen <- scored_data %>% 
+#   unite(genus, col = 'binomial', epithet, sep = "_") %>% 
+#   pull(binomial)
+
+# full_lookup <- setNames(nomen, position)
+#divisive.clust$order <- full_lookup[divisive.clust[["order"]]]
+#divisive.clust$order <- unname(divisive.clust[["order"]])
+
+dendro.col <- dendro %>%
+  set("branches_k_color", k = 7,
+      value =  c("darkslategray", "darkslategray4", "darkslategray3", "gold3",
+                 "darkcyan", "cyan3", "gold3")) %>%
+  set("branches_lwd", 0.6) %>%
+  set("labels_colors", 
+      value = c("darkslategray")) %>% 
+  set("labels_cex", 0.5)
+
+ggd1 <- as.ggdend(dendro.col)
+
+ggplot(ggd1) +
+   labs(x = "Taxa", y = "Height", 
+        title = "Categorical Trait Based Dendrogram based on Gower Distances, k = 7") +
+   theme(axis.text.x = element_text(angle = 45, hjust = 1, vjust = 0.5))
+
+
+scored_data_1 <- scored_data %>% 
+  unite("binomial", genus:epithet)
+
+
+png('cluster_analysis.png',  width = 3000, height = 3000, units = "px",)
+
+par(cex = 2.5, mar = c(3,3,3,7))
+plot(dendro,
+     main = "Categorical Trait Based Dendrogram based on Gower Distances, k = 7",
+     horiz =  TRUE,  nodePar = list(cex = 1.5))
+
+dev.off()
+
+
+```
+
